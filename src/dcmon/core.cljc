@@ -506,7 +506,7 @@ Options:
                    nil))
         status (:status evt)
         init? (= "start" status)]
-    (when (not= "exec_" (.substr status 0 5))
+    (when (and status (not= "exec_" (.substr status 0 5)))
       (if verbose-events
         (event :docker-event evt)
         (event :docker-event (select-keys evt [:id :status])))
