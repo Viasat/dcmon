@@ -4,7 +4,7 @@
   "license": "SEE LICENSE IN LICENSE",
   "description": "docker-compose monitor",
   "dependencies": {
-    "dockerode": "^3.3.1",
+    "dockerode": "^4.0.9",
     "ink": "^3.2.0",
     "js-yaml": "^4.1.0",
     "nbb": "^0.3.2",
