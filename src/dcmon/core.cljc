@@ -499,18 +499,39 @@ Options:
   "[Async] Log and handle docker container events."
   [opts docker evt-buf]
   (let [{:keys [verbose-events]} opts
-        evt-str (.toString evt-buf "utf8")
+        evt-str (if (string? evt-buf) evt-buf (.toString evt-buf "utf8"))
         evt (try (->clj (js/JSON.parse evt-str))
                  (catch :default e nil
                    (event :docker-error {:invalid-event evt-str})
                    nil))
-        status (:status evt)
-        init? (= "start" status)]
+        status (or (:status evt) (:Action evt))
+        init? (= "start" status)
+        evt (if (and status (not (:status evt)))
+              (assoc evt :status status)
+              evt)]
     (when (and status (not= "exec_" (.substr status 0 5)))
-      (if verbose-events
-        (event :docker-event evt)
-        (event :docker-event (select-keys evt [:id :status])))
-      (update-container docker (:id evt) init?))))
+      (let [evt-id (or (:id evt) (:ID evt) (get-in evt [:Actor :ID]) (get-in evt [:Actor :id]))]
+        (if verbose-events
+          (event :docker-event evt)
+          (event :docker-event (select-keys evt [:id :ID :status])))
+        (when evt-id
+          (update-container docker evt-id init?))))))
+
+(defn docker-event-stream-handler
+  "[Async] Handle docker event stream chunks. Docker sends newline-delimited
+  JSON; buffer partial chunks and parse complete lines only."
+  [opts docker buf-atom chunk]
+  (let [data (str @buf-atom (.toString chunk "utf8"))
+        parts (js->clj (.split data "\n"))
+        tail (last parts)
+        events (butlast parts)]
+    (reset! buf-atom tail)
+    (doseq [line events
+            :when (not (S/blank? line))]
+      (try
+        (docker-event-handler opts docker line)
+        (catch :default e
+          (event :docker-error {:invalid-event line}))))))
 
 (defn -main [& argv]
   (P/let [opts (parse-opts (or argv #js []))
@@ -545,9 +566,11 @@ Options:
           docker (Docker.)
           containers (.listContainers docker (clj->js {:all true
                                                        :filters container-filter}))
-          event-obj (.getEvents docker (clj->js {:filters event-filter}))]
+          event-obj (.getEvents docker (clj->js {:filters event-filter}))
+          event-buf (atom "")]
 
-    (.on event-obj "data" (partial docker-event-handler opts docker))
+    (.on event-obj "data"
+         (partial docker-event-stream-handler opts docker event-buf))
 
     (reset! ctx {:settings settings
                  :services {}
