@@ -478,16 +478,18 @@ Options:
             status (-> inspect :State :Status)
             tty (-> inspect :Config :Tty)
             service (keyword (-> inspect :Config :Labels :com.docker.compose.service))
-            cidx (js/parseInt (-> inspect :Config :Labels :com.docker.compose.container-number))
-            {:keys [services]} (ensure-service service cidx)]
-      (swap! ctx #(-> %
-                      (assoc-in [:containers id] inspect)
-                      (assoc-in [:services service cidx :id] id)))
-      (if init?
-        (init-container service cidx container status tty
-                        (partial docker-log-handler service cidx))
-        (event :container-update {:service service :cidx cidx :id id
-                                  :status status})))
+            cidx (js/parseInt (-> inspect :Config :Labels :com.docker.compose.container-number))]
+      (if (or (nil? service) (js/isNaN cidx))
+        (event :docker-error {:id id :reason "missing compose labels, skipping"})
+        (let [{:keys [services]} (ensure-service service cidx)]
+          (swap! ctx #(-> %
+                          (assoc-in [:containers id] inspect)
+                          (assoc-in [:services service cidx :id] id)))
+          (if init?
+            (init-container service cidx container status tty
+                            (partial docker-log-handler service cidx))
+            (event :container-update {:service service :cidx cidx :id id
+                                      :status status})))))
     (fn [err]
       (if (.-statusCode err)
         (event :docker-error {:id id :status-code (.-statusCode err)})
